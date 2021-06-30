@@ -1,0 +1,309 @@
+---
+title: "Monografia 2"
+author: "Mateus Lanz Mocellin"
+date: "`r Sys.Date()`"
+output:
+  rmdformats::readthedown
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+```
+
+## Monografia Mateus
+
+Leitura dos dados e bibliotecas utilizadas
+
+```{r, echo=TRUE}
+
+library(readxl)
+library(tsibble)
+library(tidyverse)
+library(ggplot2)
+library(fpp3)
+library(fable)
+#library(fpp2)
+
+
+BD <- read_excel("#Path/BD_Monografia_Mateus_Lanz.xlsx", 
+                 sheet= "Item B - cimento",
+                 col_types = c("date", "numeric"))
+
+# "Item A - tijolo"
+# "Item B - cimento"
+# "Item C - argamassa"
+
+```
+
+## Fazendo alterações necessárias nos dados
+
+
+```{r, echo=TRUE}
+
+BD <- BD %>%
+  mutate(Month = yearmonth(Data),
+         Vendas_mil = Venda) %>%
+  as_tsibble(index = Month)
+
+BD <- BD %>%
+  mutate(YearMonth = yearmonth(Data))
+
+BD <- BD %>% mutate(Quarter= quarter(Data))
+
+```
+
+## Primeira visualização
+
+
+```{r, echo=TRUE}
+
+autoplot(BD, Vendas_mil) +
+  labs(title = "Vendas do item B",
+       subtitle = "Item B",
+       x = "Mês/Ano",
+       y = "Vendas mensais")
+```
+
+Parece existir uma forte e definida sazonalidade, para isso, serão utilizados gráficos específicos para explicitar essa sazonalidade.
+
+## Gráficos de sazonalidade
+
+```{r, echo=TRUE}
+
+#Plotagem com temporadas - meses
+
+BD %>% gg_season(Vendas_mil)
+
+#Subplotagem de cada mês
+
+BD %>% gg_subseries(Vendas_mil)
+
+#Plotagem de autocorrelação
+
+BD %>% ACF(Vendas_mil) %>% autoplot()
+```
+
+
+## Dividindo os dados em dados de treinamento e dados de teste
+
+```{r, echo=TRUE}
+
+#Recomenda-se usar uma divisão de 75%-25% para a divisão
+
+number_rows <- BD %>% nrow()
+number_test <- round(number_rows*0.25)
+
+test_data <- BD %>% slice(n() - number_test:0)
+test_data
+
+train_data <- BD %>% slice(0:(n()-9))
+train_data
+
+```
+
+
+```{r}
+
+
+ETS_AAA_fit <- train_data %>% model(ETS(Vendas_mil ~ error("A") + trend("N") +
+                                                season("A")))
+
+ETS_MAM_fit <- train_data %>% model(ETS(Vendas_mil ~ error("M") + trend("N") +
+                                                season("M")))
+ETS_teste_fit <- train_data %>% model(ETS(Vendas_mil))
+
+#ETS_AAA_fit <- train_data %>% model(ETS(Vendas_mil ~ error("A") + trend("A") +
+#                                                season("A")))
+
+#ETS_AAM_fit <- train_data %>% model(ETS(Vendas_mil ~ error("A") + trend("A") +
+#                                                season("M")))
+
+
+ARIMA_fit <- train_data %>% model(ARIMA(Vendas_mil))
+ARIMA_fit_2 <- train_data %>% model(ARIMA(Vendas_mil ~ pdq(0,0,0) + PDQ(P=0:12,D=0:2,Q=0:12, period=6)))
+
+#ARIMA_fit_6M <- train_data %>% model(ARIMA(Vendas_mil ~ pdq(0,1,0) + PDQ(P=0,D=1,Q=0, period=6)))
+
+
+#ETS_MAA_fc <- forecast(ETS_MAA_fit, h=9)
+ETS_MAM_fc <- forecast(ETS_MAM_fit, h=9)
+ETS_teste_fc <- forecast(ETS_teste_fit, h=9)
+#ETS_AAM_fc <- forecast(ETS_AAM_fit, h=9)
+ETS_AAA_fc <- forecast(ETS_AAA_fit, h=9)
+#ETS_MMN_fc <- forecast(ETS_MMN_fit, h=9)
+#ETS_AMN_fc <- forecast(ETS_AMN_fit, h=9)
+ARIMA_fc <- forecast(ARIMA_fit, h=9)
+ARIMA_fc_2 <- forecast(ARIMA_fit_2, h=9)
+#ARIMA_fc_6M <- forecast(ARIMA_fit_6M, h=9)
+
+colors <- c("MA - 3 meses" = "steelblue", 
+            "ETS ANA" = "red", 
+            "ETS MNM" = "#E7B800",
+            "Arima" = "green",
+            "Dados" = "black",
+            "Arima 6 M" = "salmon",
+            "Arima 3 M" = "purple",
+            "Arima sazonal" = "darksalmon")
+
+
+#accuracy(ETS_MAA_fc,test_data)
+#accuracy(ETS_MAM_fc, test_data)
+accuracy(ETS_MAM_fc, test_data)
+accuracy(ETS_AAA_fc,test_data)
+accuracy(ARIMA_fc,test_data)
+accuracy(ARIMA_fc_2,test_data)
+accuracy(ETS_teste_fit,test_data)
+
+
+
+train_data %>% ggplot(aes(x=Month,y=Vendas_mil)) + 
+  geom_line() +
+#  geom_line(data=ETS_AAN_fc, aes(x=Month,y=.mean, color="ETS"), size=1) +
+  geom_line(data=ETS_AAA_fc, aes(x=Month,y=.mean, color="ETS ANA")) +
+  geom_line(data=ETS_MAM_fc, aes(x=Month,y=.mean, color="ETS MNM")) +
+#  geom_line(data=ARIMA_fc_2, aes(x=Month,y=.mean, color="Arima sazonal")) +
+#  geom_line(data=Media_movel, aes(x=Month,y=MA_3,color="MA - 3 meses")) +
+  geom_line(data=ARIMA_fc, aes(x=Month,y=.mean, color="Arima")) +
+#  geom_line(data=HW_fc, aes(x=Month,y=.mean, color="Holt-Winters")) +
+#  geom_line(data=ARIMA_fc_6M, aes(x=Month,y=.mean, color="Arima 6 M")) +
+  geom_line(data=test_data, aes(x=Month,y=Vendas_mil, color="Dados")) +
+  labs(y="Vendas",
+       color = "Legend") +
+  scale_color_manual(values = colors)
+
+
+
+erros_etsmult <- abs(ETS_mult_fc$.mean - test_data$Vendas_mil)
+erros_mm <- abs(Media_movel$MA_3 - test_data$Vendas_mil)
+
+ETS_AAA_fc_MAD <- mean(abs(ETS_AAA_fc$.mean - test_data$Vendas_mil))
+MM_MAD <- mean(abs(Media_movel$MA_3 - test_data$Vendas_mil))
+ETS_add_fc_MAD <- mean(abs(ETS_MAN_fc$.mean - test_data$Vendas_mil))
+ARIMA_fc_MAD <- mean(abs(ARIMA_fc$.mean - test_data$Vendas_mil))
+
+
+plot(x=seq(date), y=group1, type="l", lty=1, ylim=c(5,20),
+     axes=F, bty="n", xaxs="i", yaxs="i", main="My Title",
+     xlab="", ylab="Total Risk-Based Capital Ratio")
+
+
+#----------------------------------------------------------------------------------Item B
+
+
+SES_fit <- train_data %>% model(ETS(Vendas_mil ~ error("A")))
+
+Naive_fit <- train_data %>% model(NAIVE(Vendas_mil))
+
+ARIMA_fit <- train_data %>% model(ARIMA(Vendas_mil))
+
+Media_movel <- BD %>% mutate(
+    "MA_3" = slider::slide_dbl(Vendas_mil, mean,
+                               .before = 3, .after = 0, .complete = TRUE))
+
+SES_fc <- forecast(SES_fit, h=9)
+Naive_fc <- forecast(Naive_fit,h=9)
+ARIMA_fc <- forecast(ARIMA_fit, h=9)
+
+colors <- c("MA - 3 meses" = "steelblue", 
+            "SES" = "#E7B800",
+            "Naive" = "red",
+            "Arima" = "green",
+            "Dados" = "black")
+
+
+train_data %>% ggplot(aes(x=Month,y=Vendas_mil)) + 
+  geom_line() +
+  geom_line(data=SES_fc, aes(x=Month,y=.mean, color="SES")) +
+  geom_line(data=Media_movel, aes(x=Month,y=MA_3,color="MA - 3 meses")) +
+  geom_line(data=Naive_fc, aes(x=Month,y=.mean, color="Naive")) +
+    geom_line(data=ARIMA_fc, aes(x=Month,y=.mean, color="Arima")) +
+  geom_line(data=test_data, aes(x=Month,y=Vendas_mil, color="Dados")) +
+    labs(y="Vendas",
+       color = "Legend") +
+  scale_color_manual(values = colors)
+
+
+
+accuracy(ETS_add_fc,test_data)
+accuracy(ETS_mult_fc,test_data)
+accuracy(Media_movel,test_data)
+accuracy(ARIMA_fc,test_data)
+accuracy(Media_movel$MA_3,test_data$Vendas_mil)
+
+
+```
+
+```{r, echo=TRUE}
+
+#Recomenda-se usar uma divisão de 75%-25% para a divisão
+
+number_rows <- BD %>% nrow()
+number_test <- round(number_rows-34)
+
+test_data <- BD %>% slice(n() - number_test:0)
+test_data
+
+train_data <- BD %>% slice(0:(n()-1))
+train_data
+
+```
+
+
+```{r}
+
+ARIMA_fit <- train_data %>% model(ARIMA(Vendas_mil ~ pdq(1,0,0) + PDQ(0,D=0,Q=0)))
+
+ARIMA_fc <- forecast(ARIMA_fit, h=1)
+
+
+Media_movel <- test_data %>% mutate(
+    "MA_3" = c( #Adicionar valores MM-3meses)
+
+
+
+
+
+
+
+colors <- c("MA - 3 meses" = "steelblue", 
+            "ETS MAA" = "red", 
+            "ETS MNM" = "#E7B800",
+            "Arima" = "green",
+            "Dados" = "black",
+            "Arima 6 M" = "salmon",
+            "Arima 3 M" = "purple",
+            "Holt-Winters" = "darksalmon")
+
+
+train_data %>% ggplot(aes(x=Month,y=Vendas_mil)) + 
+  geom_line() +
+  geom_line(data=ETS_MAM_grafico, aes(x=Month,y=ETS_MAM, color="ETS MNM")) +
+  geom_line(data=Media_movel, aes(x=Month,y=MA_3,color="MA - 3 meses")) +
+#  geom_line(data=ETS_mult_fc, aes(x=Month,y=.mean, color="Arima 6 M")) +
+  geom_line(data=test_data, aes(x=Month,y=Vendas_mil, color="Dados")) +
+  labs(y="Vendas",
+       color = "Legend") +
+  scale_color_manual(values = colors)
+
+
+accuracy(ETS_MAM_grafico$ETS_MAM,test_data$Vendas_mil)
+accuracy(Media_movel$MA_3,test_data$Vendas_mil)
+
+
+erros_ARIMA <- abs(ETS_MAM_grafico$ETS_MAM - test_data$Vendas_mil)
+erros_mm <- abs(Media_movel$MA_3 - test_data$Vendas_mil)
+
+ARIMA_fc_MAD <- mean(abs(ETS_MAM_grafico$ETS_MAM - test_data$Vendas_mil))
+MM_MAD <- mean(abs(Media_movel$MA_3 - test_data$Vendas_mil))
+
+
+
+plot(x=test_data$Month,y=erros_ARIMA, type="l", lty=1,
+     axes=F, bty="n", xaxs="i", yaxs="i", main="Medidas de performance",
+     xlab="", ylab="Erros")
+lines(x=test_data$Month,y=erros_mm, lty=2)
+axis(side=1, labels=test_data$Month)
+axis(side=2, las=1)
+par(xpd=TRUE)
+legend(x=0, y=2, legend=c("Arima", "MM"), lty=1:2, box.lty=0, ncol=2)
+```
